@@ -1,26 +1,31 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useRef, useState } from "react";
-import { analyzeOM } from "@/lib/analyze.functions";
-import { Upload, FileText, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { triggerAnalysis } from "@/lib/analyze.functions";
+import { Upload, FileText, Loader2, AlertCircle, Sparkles } from "lucide-react";
 
 export const Route = createFileRoute("/upload")({
   head: () => ({
     meta: [
       { title: "Upload OM — Ledger" },
-      { name: "description", content: "Upload a multifamily Offering Memorandum PDF to run a 5-rule risk screen." },
+      { name: "description", content: "Upload a commercial real-estate Offering Memorandum PDF to run an automated risk screen." },
     ],
   }),
   component: UploadPage,
 });
 
+const MAX_MB = 50;
+
+type Phase = "idle" | "uploading" | "error";
+
 function UploadPage() {
-  const analyze = useServerFn(analyzeOM);
+  const trigger = useServerFn(triggerAnalysis);
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [dragOver, setDragOver] = useState(false);
-  const [phase, setPhase] = useState<"idle" | "reading" | "analyzing" | "error">("idle");
+  const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
 
   const onPick = (f: File | null) => {
@@ -30,8 +35,8 @@ function UploadPage() {
       setError("Please upload a PDF file.");
       return;
     }
-    if (f.size > 25 * 1024 * 1024) {
-      setError("File is over 25 MB. Try a smaller PDF.");
+    if (f.size > MAX_MB * 1024 * 1024) {
+      setError(`File is over ${MAX_MB} MB. Try a smaller PDF.`);
       return;
     }
     setFile(f);
@@ -39,33 +44,56 @@ function UploadPage() {
 
   const onSubmit = async () => {
     if (!file) return;
-    setPhase("reading");
+    setPhase("uploading");
     setError(null);
     try {
-      const base64 = await fileToBase64(file);
-      setPhase("analyzing");
-      const result = await analyze({
-        data: {
-          file_name: file.name,
-          file_base64: base64,
-          mime_type: file.type || "application/pdf",
-        },
-      });
-      navigate({ to: "/analysis/$id", params: { id: result.id } });
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const userId = session?.user?.id;
+      if (!userId) throw new Error("No session yet — refresh the page and try again.");
+
+      const propertyGuess = file.name.replace(/\.pdf$/i, "").trim() || file.name;
+
+      // 1. Create the pending row (RLS scopes it to this user).
+      const { data: row, error: insErr } = await supabase
+        .from("analyses")
+        .insert({ file_name: file.name, property_name: propertyGuess, status: "pending" })
+        .select("id")
+        .single();
+      if (insErr || !row) throw new Error(insErr?.message ?? "Could not create the screening record.");
+
+      // 2. Upload the OM to owner-scoped Storage: oms/{user}/{id}/{file}
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const storagePath = `${userId}/${row.id}/${safeName}`;
+      const { error: upErr } = await supabase.storage
+        .from("oms")
+        .upload(storagePath, file, { contentType: file.type || "application/pdf", upsert: true });
+      if (upErr) throw new Error(`Upload failed: ${upErr.message}`);
+
+      // 3. Record the path on the row.
+      await supabase.from("analyses").update({ storage_path: storagePath }).eq("id", row.id);
+
+      // 4. Fire the n8n pipeline (no-op if not configured yet — deal stays pending).
+      await trigger({ data: { analysis_id: row.id, storage_path: storagePath } });
+
+      // 5. Go to the deal; Realtime updates it as n8n works.
+      navigate({ to: "/analysis/$id", params: { id: row.id } });
     } catch (e) {
       setPhase("error");
-      setError(e instanceof Error ? e.message : "Something went wrong analyzing the OM.");
+      setError(e instanceof Error ? e.message : "Something went wrong starting the screen.");
     }
   };
 
-  const busy = phase === "reading" || phase === "analyzing";
+  const busy = phase === "uploading";
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-12">
       <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Step 1 of 1</p>
       <h1 className="font-display mt-2 text-5xl">Screen a new deal</h1>
       <p className="mt-3 max-w-xl text-sm text-muted-foreground">
-        Drop in the full Offering Memorandum PDF. Ledger reads the income, expense, debt, occupancy, rent roll and repair numbers, then evaluates five risk rules.
+        Drop in the full Offering Memorandum PDF — any commercial type. Ledger detects the property type,
+        extracts the metrics, and runs the risk screen automatically.
       </p>
 
       <div className="mt-8">
@@ -95,7 +123,7 @@ function UploadPage() {
                 <Upload className="h-5 w-5 text-primary" />
               </div>
               <div className="mt-4 font-medium">Drop OM PDF here or click to browse</div>
-              <div className="mt-1 text-xs text-muted-foreground">PDF only · up to 25 MB</div>
+              <div className="mt-1 text-xs text-muted-foreground">PDF only · up to {MAX_MB} MB</div>
             </>
           ) : (
             <div className="flex items-center justify-center gap-3 text-left">
@@ -132,52 +160,40 @@ function UploadPage() {
             disabled={!file || busy}
             className="inline-flex min-w-[200px] items-center justify-center gap-2 rounded-md bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
           >
-            {phase === "reading" && (<><Loader2 className="h-4 w-4 animate-spin" /> Reading PDF…</>)}
-            {phase === "analyzing" && (<><Loader2 className="h-4 w-4 animate-spin" /> Running risk screen…</>)}
-            {(phase === "idle" || phase === "error") && (<>Run risk screen</>)}
+            {busy ? (<><Loader2 className="h-4 w-4 animate-spin" /> Uploading…</>) : (<><Sparkles className="h-4 w-4" /> Run risk screen</>)}
           </button>
         </div>
       </div>
 
       <div className="mt-12 card-base p-6">
-        <h2 className="text-sm font-semibold">What Ledger checks</h2>
-        <ul className="mt-4 space-y-3 text-sm">
-          <RuleHint label="Occupancy & Vacancy" detail="High risk if occupancy ≤ 85% with vacancy < 5%. Critical if occupancy < 80% with vacancy > 5%." />
-          <RuleHint label="Debt Service Coverage" detail="Healthy above 1.35x. High risk at or below 1.35x." />
-          <RuleHint label="Going-in Cap Rate" detail="High risk if cap < 5%. Critical if cap < 5% AND vacancy > 10%." />
-          <RuleHint label="Income Concentration" detail="High risk if >25% of income comes from a single tenant/employer. Critical if that source is also shrinking." />
-          <RuleHint label="Deferred CapEx" detail="High risk if deferred capex > 5% of purchase price. Critical if NOI margin is also below the market average." />
-
-        </ul>
+        <h2 className="text-sm font-semibold">How it works</h2>
+        <ol className="mt-4 space-y-3 text-sm">
+          <Step n={1} label="Detect the property type" detail="The model reads the OM and classifies it (multifamily, hotel, office, retail, industrial, mixed-use). You can correct it on the deal page." />
+          <Step n={2} label="Extract the metrics" detail="A universal core (NOI, cap rate, DSCR, occupancy, price) plus type-specific metrics (RevPAR/ADR, WALT, rent roll …)." />
+          <Step n={3} label="Run the risk screen" detail="Per-type rules with thresholds you can tune in Settings. Pass or pass-with-conditions get an Agent report; failures are kept and badged Excluded." />
+        </ol>
         <p className="mt-5 rounded-md border border-info/20 bg-info/5 p-3 text-xs text-info">
-          If any number can't be extracted with confidence, Ledger marks that rule <span className="font-semibold">needs manual review</span> rather than guessing.
+          Anything that can't be extracted with confidence is flagged for manual review rather than guessed.
         </p>
       </div>
     </div>
   );
 }
 
-function RuleHint({ label, detail }: { label: string; detail: string }) {
+interface StepProps {
+  n: number;
+  label: string;
+  detail: string;
+}
+
+function Step({ n, label, detail }: StepProps) {
   return (
     <li className="flex gap-3">
-      <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
+      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-semibold text-primary">{n}</span>
       <div>
         <div className="font-medium">{label}</div>
         <div className="text-muted-foreground text-xs mt-0.5">{detail}</div>
       </div>
     </li>
   );
-}
-
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      const idx = result.indexOf(",");
-      resolve(idx >= 0 ? result.slice(idx + 1) : result);
-    };
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
 }

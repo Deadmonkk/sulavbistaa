@@ -1,84 +1,79 @@
-import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { useEffect } from "react";
-import { ArrowLeft, CheckCircle2, AlertTriangle, XCircle, HelpCircle, Loader2, FileText, RefreshCw } from "lucide-react";
+import { useAnalysesRealtime } from "@/hooks/use-analyses-realtime";
+import {
+  UNIVERSAL_METRICS,
+  TYPE_METRICS,
+  SUBTYPE_TO_FAMILY,
+  SUBTYPE_LABELS,
+  FAMILY_LABELS,
+  type PropertyFamily,
+  type PropertySubtype,
+  type RiskRuleResult,
+  type Recommendation,
+} from "@/lib/screening/taxonomy";
+import { formatMetric } from "@/lib/screening/format";
+import { Markdown } from "@/components/markdown";
+import { ArrowLeft, CheckCircle2, AlertTriangle, XCircle, HelpCircle, Loader2, FileText, RefreshCw, ClipboardList, Download } from "lucide-react";
 
 export const Route = createFileRoute("/analysis/$id")({
   head: () => ({
     meta: [
       { title: "Risk results — Ledger" },
-      { name: "description", content: "Detailed risk-rule results and recommendation for an uploaded multifamily OM." },
+      { name: "description", content: "Risk-rule results, extracted metrics and recommendation for an uploaded OM." },
     ],
   }),
   component: AnalysisPage,
 });
 
-type RuleStatus = "healthy" | "high_risk" | "critical_risk" | "needs_manual_review";
-
-interface Rule {
-  id: string;
-  label: string;
-  status: RuleStatus;
-  metric?: string;
-  threshold?: string;
-  detail: string;
-}
-
-interface FV<T = number> { value: T | null; confidence?: string; note?: string }
-interface Extracted {
-  property_name?: FV<string>;
-  units?: FV;
-  purchase_price?: FV;
-  gross_income?: FV;
-  operating_expenses?: FV;
-  noi?: FV;
-  noi_margin_pct?: FV;
-  market_avg_noi_margin_pct?: FV;
-  annual_debt_service?: FV;
-  dscr?: FV;
-  occupancy_pct?: FV;
-  vacancy_pct?: FV;
-  avg_actual_rent?: FV;
-  avg_market_rent?: FV;
-  cap_rate_pct?: FV;
-  estimated_repair_cost?: FV;
-  deferred_capex?: FV;
-  top_tenant_income_pct?: FV;
-  top_tenant_name?: FV<string>;
-  top_tenant_shrinking?: FV<boolean>;
-}
-
+type MetricBag = Record<string, number | string | null>;
 
 interface Row {
   id: string;
   file_name: string;
   property_name: string | null;
+  property_type: string | null;
+  property_subtype: string | null;
+  type_detected_by: string | null;
+  location: string | null;
   status: string;
-  recommendation: "pursue" | "pursue_with_conditions" | "pass" | null;
-  extracted_data: Extracted | null;
-  risk_results: { rules: Rule[]; decision: { reason: string } } | null;
+  recommendation: Recommendation | null;
+  metrics: MetricBag | null;
+  type_metrics: MetricBag | null;
+  risk_results: { rules: RiskRuleResult[]; decision: { reason: string } } | null;
+  verify_items: { field: string; reason: string }[] | null;
+  report_text: string | null;
+  report_path: string | null;
   error_message: string | null;
   created_at: string;
 }
 
+const SUBTYPES = Object.keys(SUBTYPE_LABELS) as PropertySubtype[];
+
+function resolveFamily(row: Row): PropertyFamily | null {
+  if (row.property_subtype && row.property_subtype in SUBTYPE_TO_FAMILY) {
+    return SUBTYPE_TO_FAMILY[row.property_subtype as PropertySubtype];
+  }
+  if (row.property_type && row.property_type in FAMILY_LABELS) {
+    return row.property_type as PropertyFamily;
+  }
+  return null;
+}
+
 function AnalysisPage() {
   const { id } = Route.useParams();
-  const router = useRouter();
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, refetch } = useQuery({
     queryKey: ["analysis", id],
     queryFn: async () => {
       const { data, error } = await supabase.from("analyses").select("*").eq("id", id).single();
       if (error) throw error;
-      return data as Row;
+      return data as unknown as Row;
     },
-    refetchInterval: (q) => (q.state.data?.status === "processing" ? 1500 : false),
   });
 
-  // Re-render when processing completes
-  useEffect(() => {
-    if (data?.status === "complete") router.invalidate();
-  }, [data?.status, router]);
+  useAnalysesRealtime(["analysis", id]);
 
   if (isLoading || !data) {
     return (
@@ -89,13 +84,16 @@ function AnalysisPage() {
     );
   }
 
-  if (data.status === "processing") {
+  if (data.status === "pending" || data.status === "processing") {
+    const queued = data.status === "pending";
     return (
       <div className="mx-auto max-w-3xl px-6 py-20 text-center">
         <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" />
-        <h1 className="font-display mt-6 text-3xl">Analyzing OM…</h1>
+        <h1 className="font-display mt-6 text-3xl">{queued ? "Queued…" : "Analyzing OM…"}</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Extracting numbers and running risk rules. This usually takes 20–60 seconds.
+          {queued
+            ? "Waiting for the screening pipeline to pick this up. It updates here automatically."
+            : "Detecting the property type, extracting metrics and running the risk screen. Updates live."}
         </p>
       </div>
     );
@@ -109,17 +107,38 @@ function AnalysisPage() {
           <XCircle className="mx-auto h-10 w-10 text-destructive" />
           <h1 className="mt-4 text-xl font-semibold">Analysis failed</h1>
           <p className="mt-2 text-sm text-muted-foreground">{data.error_message ?? "Unknown error."}</p>
-          <Link to="/upload" className="mt-5 inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">
-            <RefreshCw className="h-4 w-4" /> Try again
-          </Link>
+          <div className="mt-5 flex justify-center gap-2">
+            <button onClick={() => refetch()} className="inline-flex items-center gap-2 rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium hover:bg-secondary">
+              <RefreshCw className="h-4 w-4" /> Refresh
+            </button>
+            <Link to="/upload" className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">
+              Try another OM
+            </Link>
+          </div>
         </div>
       </div>
     );
   }
 
+  const family = resolveFamily(data);
+  const metrics = data.metrics ?? {};
+  const typeMetrics = data.type_metrics ?? {};
   const rules = data.risk_results?.rules ?? [];
   const decision = data.risk_results?.decision;
-  const extracted = data.extracted_data ?? {};
+  const verifyItems = data.verify_items ?? [];
+  const isExcluded = data.status === "excluded" || data.recommendation === "pass";
+
+  const onChangeSubtype = async (subtype: PropertySubtype) => {
+    await supabase
+      .from("analyses")
+      .update({
+        property_subtype: subtype,
+        property_type: SUBTYPE_TO_FAMILY[subtype],
+        type_detected_by: "user",
+      })
+      .eq("id", id);
+    refetch();
+  };
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-10">
@@ -129,50 +148,127 @@ function AnalysisPage() {
         <div className="min-w-0">
           <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Risk results</p>
           <h1 className="font-display mt-2 text-4xl">{data.property_name || data.file_name}</h1>
-          <p className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+          <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <FileText className="h-3.5 w-3.5" />
             <span className="truncate">{data.file_name}</span>
+            {data.location && (<><span>·</span><span>{data.location}</span></>)}
             <span>·</span>
-            <span>{new Date(data.created_at).toLocaleString()}</span>
+            <span>{new Date(data.created_at).toLocaleDateString()}</span>
           </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <label className="text-[11px] uppercase tracking-wider text-muted-foreground">Type</label>
+          <select
+            value={(data.property_subtype as string) ?? ""}
+            onChange={(e) => onChangeSubtype(e.target.value as PropertySubtype)}
+            className="rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm"
+          >
+            <option value="" disabled>Set type…</option>
+            {SUBTYPES.map((s) => (<option key={s} value={s}>{SUBTYPE_LABELS[s]}</option>))}
+          </select>
+          {data.type_detected_by === "ai" && data.property_subtype && (
+            <span className="rounded-full bg-info/10 px-2 py-0.5 text-[10px] text-info">AI</span>
+          )}
         </div>
       </div>
 
-      <RecommendationBanner recommendation={data.recommendation} reason={decision?.reason ?? ""} />
+      <RecommendationBanner recommendation={data.recommendation} reason={decision?.reason ?? ""} excluded={isExcluded} />
 
       <div className="mt-10 grid gap-6 lg:grid-cols-[2fr_1fr]">
-        <section>
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Risk rules</h2>
-          <div className="mt-3 space-y-3">
-            {rules.map((r) => <RuleCard key={r.id} rule={r} />)}
+        <section className="space-y-8">
+          <div>
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Risk screen</h2>
+            <div className="mt-3 space-y-3">
+              {rules.length === 0 && <p className="text-sm text-muted-foreground">No risk rules recorded.</p>}
+              {rules.map((r) => <RuleCard key={r.id} rule={r} />)}
+            </div>
           </div>
+
+          {verifyItems.length > 0 && (
+            <div>
+              <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                <ClipboardList className="h-4 w-4" /> Items to verify
+              </h2>
+              <ul className="mt-3 card-base divide-y divide-border/60 p-0">
+                {verifyItems.map((v, i) => (
+                  <li key={i} className="px-5 py-3 text-sm">
+                    <span className="font-medium">{v.field}</span>
+                    <span className="text-muted-foreground"> — {v.reason}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {data.report_text && (
+            <ReportCard reportText={data.report_text} reportPath={data.report_path} />
+          )}
         </section>
 
-        <aside>
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Key numbers</h2>
-          <div className="mt-3 card-base p-5 space-y-3">
-            <KV label="Units" value={fmtNum(extracted.units?.value)} confidence={extracted.units?.confidence} />
-            <KV label="Purchase price" value={fmtMoney(extracted.purchase_price?.value)} confidence={extracted.purchase_price?.confidence} />
-            <KV label="Gross income" value={fmtMoney(extracted.gross_income?.value)} confidence={extracted.gross_income?.confidence} />
-            <KV label="Operating expenses" value={fmtMoney(extracted.operating_expenses?.value)} confidence={extracted.operating_expenses?.confidence} />
-            <KV label="NOI" value={fmtMoney(extracted.noi?.value)} confidence={extracted.noi?.confidence} bold />
-            <KV label="NOI margin" value={fmtPct(extracted.noi_margin_pct?.value)} confidence={extracted.noi_margin_pct?.confidence} />
-            <KV label="Market avg NOI margin" value={fmtPct(extracted.market_avg_noi_margin_pct?.value)} confidence={extracted.market_avg_noi_margin_pct?.confidence} />
-            <KV label="Annual debt service" value={fmtMoney(extracted.annual_debt_service?.value)} confidence={extracted.annual_debt_service?.confidence} />
-            <KV label="DSCR" value={extracted.dscr?.value !== null && extracted.dscr?.value !== undefined ? (extracted.dscr!.value as number).toFixed(2) + "x" : "—"} confidence={extracted.dscr?.confidence} />
-            <KV label="Occupancy" value={fmtPct(extracted.occupancy_pct?.value)} confidence={extracted.occupancy_pct?.confidence} />
-            <KV label="Vacancy" value={fmtPct(extracted.vacancy_pct?.value)} confidence={extracted.vacancy_pct?.confidence} />
-            <KV label="Cap rate" value={fmtPct(extracted.cap_rate_pct?.value)} confidence={extracted.cap_rate_pct?.confidence} />
-            <KV label="Avg actual rent" value={fmtMoney(extracted.avg_actual_rent?.value) + "/mo"} confidence={extracted.avg_actual_rent?.confidence} />
-            <KV label="Avg market rent" value={fmtMoney(extracted.avg_market_rent?.value) + "/mo"} confidence={extracted.avg_market_rent?.confidence} />
-            <KV label="Deferred capex" value={fmtMoney(extracted.deferred_capex?.value)} confidence={extracted.deferred_capex?.confidence} />
-            <KV label="Est. repair cost" value={fmtMoney(extracted.estimated_repair_cost?.value)} confidence={extracted.estimated_repair_cost?.confidence} />
-            <KV label="Top income source" value={(extracted.top_tenant_name?.value as string) || "—"} confidence={extracted.top_tenant_name?.confidence} />
-            <KV label="Concentration" value={fmtPct(extracted.top_tenant_income_pct?.value)} confidence={extracted.top_tenant_income_pct?.confidence} />
-            <KV label="Source shrinking?" value={extracted.top_tenant_shrinking?.value === true ? "Yes" : extracted.top_tenant_shrinking?.value === false ? "No" : "—"} confidence={extracted.top_tenant_shrinking?.confidence} />
-          </div>
+        <aside className="space-y-6">
+          <MetricList title="Key numbers" defs={UNIVERSAL_METRICS} bag={metrics} />
+          {family && TYPE_METRICS[family].length > 0 && (
+            <MetricList title={`${FAMILY_LABELS[family]} metrics`} defs={TYPE_METRICS[family]} bag={typeMetrics} />
+          )}
         </aside>
+      </div>
+    </div>
+  );
+}
 
+function MetricList({ title, defs, bag }: { title: string; defs: typeof UNIVERSAL_METRICS; bag: MetricBag }) {
+  return (
+    <div>
+      <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">{title}</h2>
+      <div className="mt-3 card-base p-5 space-y-2.5">
+        {defs.map((d) => {
+          const raw = bag[d.key];
+          const missing = raw === null || raw === undefined || raw === "";
+          return (
+            <div key={d.key} className="flex items-baseline justify-between gap-3 border-b border-border/60 pb-2 last:border-0 last:pb-0">
+              <div className="text-xs text-muted-foreground">{d.label}</div>
+              <div className={`tabular ${missing ? "italic text-muted-foreground" : "text-foreground"}`}>
+                {missing ? "not found" : formatMetric(raw, d.unit)}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ReportCard({ reportText, reportPath }: { reportText: string; reportPath: string | null }) {
+  const [downloading, setDownloading] = useState(false);
+
+  const download = async () => {
+    if (!reportPath) return;
+    setDownloading(true);
+    try {
+      const { data, error } = await supabase.storage.from("reports").createSignedUrl(reportPath, 120);
+      if (!error && data?.signedUrl) window.open(data.signedUrl, "_blank");
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Agent report</h2>
+        {reportPath && (
+          <button
+            onClick={download}
+            disabled={downloading}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium hover:bg-secondary disabled:opacity-50"
+          >
+            {downloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} Download PDF
+          </button>
+        )}
+      </div>
+      <div className="mt-3 card-base px-6 py-5">
+        <Markdown text={reportText} />
       </div>
     </div>
   );
@@ -186,14 +282,13 @@ function BackLink() {
   );
 }
 
-function RecommendationBanner({ recommendation, reason }: { recommendation: Row["recommendation"]; reason: string }) {
-  const map = {
-    pursue: { label: "Pursue", tone: "success" as const, sub: "All five rules are healthy." },
-    pursue_with_conditions: { label: "Pursue with conditions", tone: "warning" as const, sub: "Resolve high-risk flags and items needing manual review before bidding." },
-    pass: { label: "Pass", tone: "destructive" as const, sub: "Critical risk flagged — recommend declining." },
+function RecommendationBanner({ recommendation, reason, excluded }: { recommendation: Recommendation | null; reason: string; excluded: boolean }) {
+  const map: Record<Recommendation, { label: string; tone: "success" | "warning" | "destructive"; sub: string }> = {
+    pursue: { label: "Pursue", tone: "success", sub: "All risk rules pass." },
+    pursue_with_conditions: { label: "Pursue with conditions", tone: "warning", sub: "Resolve high-risk flags and items needing review before bidding." },
+    pass: { label: "Excluded", tone: "destructive", sub: "Failed the risk screen — recommend declining." },
   };
-
-  const cfg = recommendation ? map[recommendation] : null;
+  const cfg = recommendation ? map[recommendation] : excluded ? map.pass : null;
   if (!cfg) return null;
 
   const toneClasses: Record<string, string> = {
@@ -216,23 +311,23 @@ function RecommendationBanner({ recommendation, reason }: { recommendation: Row[
   );
 }
 
-function RuleCard({ rule }: { rule: Rule }) {
+function RuleCard({ rule }: { rule: RiskRuleResult }) {
   const cfg = statusCfg(rule.status);
   return (
     <div className="card-base p-5">
       <div className="flex items-start gap-4">
-        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${cfg.bg}`}>
-          {cfg.icon}
-        </div>
+        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${cfg.bg}`}>{cfg.icon}</div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <div className="font-medium">{rule.label}</div>
             <div className="flex items-center gap-2">
-              {rule.metric && <span className="font-mono text-sm tabular text-foreground/80">{rule.metric}</span>}
+              {rule.value !== null && rule.value !== undefined && (
+                <span className="font-mono text-sm tabular text-foreground/80">{rule.value}</span>
+              )}
               <span className={`rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${cfg.pill}`}>{cfg.label}</span>
             </div>
           </div>
-          <p className="mt-1.5 text-sm text-muted-foreground">{rule.detail}</p>
+          {rule.note && <p className="mt-1.5 text-sm text-muted-foreground">{rule.note}</p>}
           {rule.threshold && (
             <p className="mt-2 text-[11px] uppercase tracking-wider text-muted-foreground/80">
               Threshold: <span className="font-mono normal-case">{rule.threshold}</span>
@@ -244,43 +339,16 @@ function RuleCard({ rule }: { rule: Rule }) {
   );
 }
 
-function statusCfg(s: RuleStatus) {
+function statusCfg(s: RiskRuleResult["status"]) {
   switch (s) {
-    case "healthy":
-      return { label: "Healthy", icon: <CheckCircle2 className="h-4 w-4 text-success" />, bg: "bg-success/15", pill: "bg-success/10 text-success border-success/20" };
-    case "high_risk":
+    case "pass":
+      return { label: "Pass", icon: <CheckCircle2 className="h-4 w-4 text-success" />, bg: "bg-success/15", pill: "bg-success/10 text-success border-success/20" };
+    case "high":
       return { label: "High Risk", icon: <AlertTriangle className="h-4 w-4 text-warning" />, bg: "bg-warning/20", pill: "bg-warning/15 text-warning border-warning/30" };
-    case "critical_risk":
-      return { label: "Critical Risk", icon: <XCircle className="h-4 w-4 text-destructive" />, bg: "bg-destructive/15", pill: "bg-destructive/10 text-destructive border-destructive/20" };
-    case "needs_manual_review":
+    case "critical":
+      return { label: "Critical", icon: <XCircle className="h-4 w-4 text-destructive" />, bg: "bg-destructive/15", pill: "bg-destructive/10 text-destructive border-destructive/20" };
+    case "review":
+    default:
       return { label: "Needs review", icon: <HelpCircle className="h-4 w-4 text-info" />, bg: "bg-info/15", pill: "bg-info/10 text-info border-info/20" };
   }
-}
-
-
-function KV({ label, value, confidence, bold }: { label: string; value: string; confidence?: string; bold?: boolean }) {
-  const isMissing = confidence === "missing" || value === "—" || value === "—/mo";
-  const isLow = confidence === "low";
-  return (
-    <div className="flex items-baseline justify-between gap-3 border-b border-border/60 pb-2 last:border-0 last:pb-0">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className={`tabular ${bold ? "font-semibold" : ""} ${isMissing ? "text-muted-foreground italic" : "text-foreground"}`}>
-        {isMissing ? "not found" : value}
-        {isLow && !isMissing && <span className="ml-1.5 rounded-full bg-warning/15 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-warning">low conf.</span>}
-      </div>
-    </div>
-  );
-}
-
-function fmtMoney(n: number | null | undefined): string {
-  if (n === null || n === undefined) return "—";
-  return "$" + Math.round(n).toLocaleString();
-}
-function fmtPct(n: number | null | undefined): string {
-  if (n === null || n === undefined) return "—";
-  return n.toFixed(1) + "%";
-}
-function fmtNum(n: number | null | undefined): string {
-  if (n === null || n === undefined) return "—";
-  return n.toLocaleString();
 }

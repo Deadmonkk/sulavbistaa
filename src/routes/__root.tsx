@@ -11,6 +11,7 @@ import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
+import { ensureAnonymousSession } from "@/integrations/supabase/ensure-session";
 
 function NotFoundComponent() {
   return (
@@ -126,6 +127,20 @@ function AppHeader() {
             Dashboard
           </Link>
           <Link
+            to="/compare"
+            className="rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-secondary hover:text-foreground"
+            activeProps={{ className: "rounded-md px-3 py-1.5 text-sm bg-secondary text-foreground font-medium" }}
+          >
+            Compare
+          </Link>
+          <Link
+            to="/settings"
+            className="rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-secondary hover:text-foreground"
+            activeProps={{ className: "rounded-md px-3 py-1.5 text-sm bg-secondary text-foreground font-medium" }}
+          >
+            Settings
+          </Link>
+          <Link
             to="/upload"
             className="rounded-md bg-primary px-3.5 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90"
           >
@@ -139,6 +154,19 @@ function AppHeader() {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+
+  // Give every visitor an anonymous Supabase session so owner-scoped RLS works.
+  // If a session was just created, refetch any data loaded before it existed.
+  useEffect(() => {
+    let active = true;
+    ensureAnonymousSession().then((created) => {
+      if (active && created) queryClient.invalidateQueries();
+    });
+    return () => {
+      active = false;
+    };
+  }, [queryClient]);
+
   return (
     <QueryClientProvider client={queryClient}>
       <div className="min-h-screen flex flex-col">

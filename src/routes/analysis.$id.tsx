@@ -188,10 +188,11 @@ function BackLink() {
 
 function RecommendationBanner({ recommendation, reason }: { recommendation: Row["recommendation"]; reason: string }) {
   const map = {
-    pursue: { label: "Pursue", tone: "success" as const, sub: "All risk rules cleared." },
-    pursue_with_conditions: { label: "Pursue with conditions", tone: "warning" as const, sub: "Confirm caution items and review unverified figures before bidding." },
-    pass: { label: "Pass", tone: "destructive" as const, sub: "Material risk exposure — recommend declining." },
+    pursue: { label: "Pursue", tone: "success" as const, sub: "All five rules are healthy." },
+    pursue_with_conditions: { label: "Pursue with conditions", tone: "warning" as const, sub: "Resolve high-risk flags and items needing manual review before bidding." },
+    pass: { label: "Pass", tone: "destructive" as const, sub: "Critical risk flagged — recommend declining." },
   };
+
   const cfg = recommendation ? map[recommendation] : null;
   if (!cfg) return null;
 

@@ -1,0 +1,37 @@
+# Ledger automation stack: n8n (workflow engine) + Gotenberg (HTML -> PDF).
+# Run from THIS folder:
+#   cp .env.example .env      # then fill in n8n/.env (gitignored)
+#   docker compose up -d
+# n8n UI:        http://localhost:5678
+# Gotenberg API: http://localhost:3000  (n8n reaches it internally at http://gotenberg:3000)
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      # Shared secret — must MATCH N8N_WEBHOOK_SECRET in the app's env.
+      - N8N_WEBHOOK_SECRET=${N8N_WEBHOOK_SECRET}
+      # Supabase REST + Storage target.
+      - SUPABASE_URL=${SUPABASE_URL}
+      # New secret key (sb_secret_...). Privileged, bypasses RLS — server-side only.
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      # OpenRouter (free models).
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      # PDF service (internal compose hostname).
+      - GOTENBERG_URL=http://gotenberg:3000
+      - N8N_DIAGNOSTICS_ENABLED=false
+    volumes:
+      - n8n_data:/home/node/.n8n
+    depends_on:
+      - gotenberg
+
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+
+volumes:
+  n8n_data:

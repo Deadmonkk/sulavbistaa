@@ -1,0 +1,258 @@
+{
+  "name": "Ledger — OM analyze (Phase 1+2)",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "ledger-analyze", "options": {} },
+      "id": "node-webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 300],
+      "webhookId": "ledger-analyze"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "version": 2 },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.headers['x-webhook-secret'] }}",
+              "rightValue": "={{ $env.N8N_WEBHOOK_SECRET }}",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-secret",
+      "name": "Verify secret",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/analyses?id=eq.{{ $('Webhook').first().json.body.analysis_id }}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "apikey", "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+          { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+          { "name": "Content-Type", "value": "application/json" },
+          { "name": "Prefer", "value": "return=minimal" }
+        ] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"status\": \"processing\" } }}",
+        "options": {}
+      },
+      "id": "node-processing",
+      "name": "Mark processing",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 200]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.SUPABASE_URL }}/storage/v1/object/{{ $('Webhook').first().json.body.bucket }}/{{ $('Webhook').first().json.body.storage_path }}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "apikey", "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+          { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}" }
+        ] },
+        "options": { "response": { "response": { "responseFormat": "file" } } }
+      },
+      "id": "node-download",
+      "name": "Download OM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 200]
+    },
+    {
+      "parameters": { "operation": "pdf", "binaryPropertyName": "data", "options": {} },
+      "id": "node-extract",
+      "name": "Extract OM text",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [880, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "Authorization", "value": "=Bearer {{ $env.OPENROUTER_API_KEY }}" },
+          { "name": "Content-Type", "value": "application/json" }
+        ] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"model\": \"google/gemini-2.0-flash-exp:free\", \"response_format\": { \"type\": \"json_object\" }, \"messages\": [ { \"role\": \"system\", \"content\": \"You are a CRE underwriting analyst. Return ONLY JSON per the Ledger schema (CONTRACT.md §4). Use null for anything not stated; never guess. Include a confidence (high|low|missing) per metric.\" }, { \"role\": \"user\", \"content\": $('Extract OM text').first().json.text } ] } }}",
+        "options": {}
+      },
+      "id": "node-openrouter",
+      "name": "OpenRouter extract",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// PASTE n8n/risk-and-writeback.js here. Outputs { json: { analysis_id, patch } }.\nthrow new Error('Paste n8n/risk-and-writeback.js into this Code node.');"
+      },
+      "id": "node-score",
+      "name": "Score risk",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "version": 2 },
+          "combinator": "and",
+          "conditions": [
+            { "leftValue": "={{ $json.patch.status }}", "rightValue": "excluded", "operator": { "type": "string", "operation": "equals" } }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-excluded",
+      "name": "Excluded?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1540, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "Authorization", "value": "=Bearer {{ $env.OPENROUTER_API_KEY }}" },
+          { "name": "Content-Type", "value": "application/json" }
+        ] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"model\": \"google/gemini-2.0-flash-exp:free\", \"messages\": [ { \"role\": \"system\", \"content\": \"You are a CRE analyst. Write a concise institutional screening memo in Markdown with sections: # Summary, ## Property, ## Key metrics, ## Risk screen, ## Items to verify. Only use numbers present in the JSON; never fabricate.\" }, { \"role\": \"user\", \"content\": JSON.stringify($json.patch) } ] } }}",
+        "options": {}
+      },
+      "id": "node-report",
+      "name": "OpenRouter report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1760, 360]
+    },
+    {
+      "parameters": {
+        "jsCode": "// PASTE n8n/report-html.js here. Outputs json + binary 'index.html'.\nthrow new Error('Paste n8n/report-html.js into this Code node.');"
+      },
+      "id": "node-html",
+      "name": "Build report HTML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1980, 360]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GOTENBERG_URL }}/forms/chromium/convert/html",
+        "contentType": "multipart-form-data",
+        "sendBody": true,
+        "bodyParameters": { "parameters": [
+          { "parameterType": "formBinaryData", "name": "files", "inputDataFieldName": "index.html" }
+        ] },
+        "options": { "response": { "response": { "responseFormat": "file" } } }
+      },
+      "id": "node-pdf",
+      "name": "HTML to PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2200, 360]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/storage/v1/object/reports/{{ $('Webhook').first().json.body.user_id }}/{{ $('Webhook').first().json.body.analysis_id }}/report.pdf",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "apikey", "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+          { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+          { "name": "Content-Type", "value": "application/pdf" },
+          { "name": "x-upsert", "value": "true" }
+        ] },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {}
+      },
+      "id": "node-upload",
+      "name": "Upload report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2420, 360]
+    },
+    {
+      "parameters": {
+        "jsCode": "// PASTE n8n/attach-report.js here. Outputs { json: { analysis_id, patch } } with report_text + report_path.\nthrow new Error('Paste n8n/attach-report.js into this Code node.');"
+      },
+      "id": "node-attach",
+      "name": "Attach report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2640, 360]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/analyses?id=eq.{{ $json.analysis_id }}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "apikey", "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+          { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+          { "name": "Content-Type", "value": "application/json" },
+          { "name": "Prefer", "value": "return=minimal" }
+        ] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.patch }}",
+        "options": {}
+      },
+      "id": "node-writeback",
+      "name": "Write back",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2860, 200]
+    },
+    {
+      "parameters": {
+        "content": "## Ledger — OM analyze (Phase 1+2)\nWebhook → verify secret → mark processing → download → extract text → OpenRouter (type+metrics) → Score risk → Excluded?\n  • excluded → Write back (no report)\n  • else → OpenRouter report → Build HTML → HTML→PDF (Gotenberg) → Upload report → Attach → Write back\n\nEnv / credentials to set:\n- SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (server-side only)\n- OPENROUTER_API_KEY\n- GOTENBERG_URL (free, self-hostable HTML→PDF; or swap for puppeteer/HTML-to-PDF API)\n- N8N_WEBHOOK_SECRET (matches the app)\n\nPaste the matching n8n/*.js into the three Code nodes.\nTODO 1.5: OCR fallback when Extract OM text is empty (scanned PDFs) → vision model.\nFull spec: n8n/CONTRACT.md",
+        "height": 360,
+        "width": 440
+      },
+      "id": "node-note",
+      "name": "Read me",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [440, -200]
+    }
+  ],
+  "connections": {
+    "Webhook": { "main": [[{ "node": "Verify secret", "type": "main", "index": 0 }]] },
+    "Verify secret": { "main": [[{ "node": "Mark processing", "type": "main", "index": 0 }], []] },
+    "Mark processing": { "main": [[{ "node": "Download OM", "type": "main", "index": 0 }]] },
+    "Download OM": { "main": [[{ "node": "Extract OM text", "type": "main", "index": 0 }]] },
+    "Extract OM text": { "main": [[{ "node": "OpenRouter extract", "type": "main", "index": 0 }]] },
+    "OpenRouter extract": { "main": [[{ "node": "Score risk", "type": "main", "index": 0 }]] },
+    "Score risk": { "main": [[{ "node": "Excluded?", "type": "main", "index": 0 }]] },
+    "Excluded?": { "main": [[{ "node": "Write back", "type": "main", "index": 0 }], [{ "node": "OpenRouter report", "type": "main", "index": 0 }]] },
+    "OpenRouter report": { "main": [[{ "node": "Build report HTML", "type": "main", "index": 0 }]] },
+    "Build report HTML": { "main": [[{ "node": "HTML to PDF", "type": "main", "index": 0 }]] },
+    "HTML to PDF": { "main": [[{ "node": "Upload report", "type": "main", "index": 0 }]] },
+    "Upload report": { "main": [[{ "node": "Attach report", "type": "main", "index": 0 }]] },
+    "Attach report": { "main": [[{ "node": "Write back", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "pinData": {}
+}

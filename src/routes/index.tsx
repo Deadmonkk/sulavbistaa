@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { useAnalysesRealtime } from "@/hooks/use-analyses-realtime";
 import { ArrowUpRight, FileText, Plus, TrendingUp, AlertTriangle, XCircle, CheckCircle2 } from "lucide-react";
 
 export const Route = createFileRoute("/")({
@@ -35,6 +36,9 @@ function Dashboard() {
       return (data ?? []) as Row[];
     },
   });
+
+  // Live-update as n8n flips deals pending -> processing -> complete/excluded.
+  useAnalysesRealtime(["analyses"]);
 
   const stats = computeStats(data ?? []);
 
@@ -135,17 +139,19 @@ function DealRow({ row }: { row: Row }) {
 
 function countRules(rules: { status: string }[]) {
   return {
-    healthy: rules.filter((r) => r.status === "healthy").length,
-    high: rules.filter((r) => r.status === "high_risk").length,
-    critical: rules.filter((r) => r.status === "critical_risk").length,
-    review: rules.filter((r) => r.status === "needs_manual_review").length,
+    healthy: rules.filter((r) => r.status === "pass").length,
+    high: rules.filter((r) => r.status === "high").length,
+    critical: rules.filter((r) => r.status === "critical").length,
+    review: rules.filter((r) => r.status === "review").length,
   };
 }
 
 
 function RecommendationBadge({ value, status }: { value: string | null; status: string }) {
+  if (status === "pending") return <Pill tone="muted">Queued…</Pill>;
   if (status === "processing") return <Pill tone="muted">Processing…</Pill>;
   if (status === "failed") return <Pill tone="destructive">Failed</Pill>;
+  if (status === "excluded") return <Pill tone="destructive">Excluded</Pill>;
   if (value === "pursue") return <Pill tone="success">Pursue</Pill>;
   if (value === "pursue_with_conditions") return <Pill tone="warning">Conditional</Pill>;
   if (value === "pass") return <Pill tone="destructive">Pass</Pill>;

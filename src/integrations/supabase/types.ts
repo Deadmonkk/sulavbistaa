@@ -16,94 +16,37 @@ export type Database = {
     Tables: {
       analyses: {
         Row: {
-          confidence: Json | null
           created_at: string
           error_message: string | null
           extracted_data: Json | null
           file_name: string
           id: string
-          location: string | null
-          metrics: Json | null
           property_name: string | null
-          property_subtype: string | null
-          property_type: string | null
           recommendation: string | null
-          report_path: string | null
-          report_text: string | null
           risk_results: Json | null
           status: string
-          storage_path: string | null
-          type_detected_by: string | null
-          type_metrics: Json | null
-          updated_at: string
-          verify_items: Json | null
         }
         Insert: {
-          confidence?: Json | null
           created_at?: string
           error_message?: string | null
           extracted_data?: Json | null
           file_name: string
           id?: string
-          location?: string | null
-          metrics?: Json | null
           property_name?: string | null
-          property_subtype?: string | null
-          property_type?: string | null
           recommendation?: string | null
-          report_path?: string | null
-          report_text?: string | null
           risk_results?: Json | null
           status?: string
-          storage_path?: string | null
-          type_detected_by?: string | null
-          type_metrics?: Json | null
-          updated_at?: string
-          verify_items?: Json | null
         }
         Update: {
-          confidence?: Json | null
           created_at?: string
           error_message?: string | null
           extracted_data?: Json | null
           file_name?: string
           id?: string
-          location?: string | null
-          metrics?: Json | null
           property_name?: string | null
-          property_subtype?: string | null
-          property_type?: string | null
           recommendation?: string | null
-          report_path?: string | null
-          report_text?: string | null
           risk_results?: Json | null
           status?: string
-          storage_path?: string | null
-          type_detected_by?: string | null
-          type_metrics?: Json | null
-          updated_at?: string
-          verify_items?: Json | null
-        }
-        Relationships: []
-      }
-      risk_settings: {
-        Row: {
-          property_type: string
-          thresholds: Json
-          updated_at: string
-          user_id: string
-        }
-        Insert: {
-          property_type: string
-          thresholds: Json
-          updated_at?: string
-          user_id?: string
-        }
-        Update: {
-          property_type?: string
-          thresholds?: Json
-          updated_at?: string
-          user_id?: string
         }
         Relationships: []
       }

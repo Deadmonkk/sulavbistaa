@@ -56,18 +56,19 @@ function Dashboard() {
           alt="City skyline"
           className="hero-zoom absolute inset-0 h-full w-full object-cover"
         />
-        <div className="absolute inset-0 bg-gradient-to-r from-black/88 via-black/60 to-black/25" />
+        {/* Lighter, left-weighted wash so the skyline stays visible; text legibility comes from text-shadow, not a heavy overlay */}
+        <div className="absolute inset-0 bg-gradient-to-r from-black/75 via-black/35 to-transparent" />
         <div className="relative px-8 py-[4.5rem] sm:px-14 sm:py-[6.75rem]">
-          <p className="text-xs uppercase tracking-[0.2em] text-accent/90 animate-in fade-in slide-in-from-bottom-2 duration-500">
+          <p className="text-xs uppercase tracking-[0.2em] text-accent animate-in fade-in slide-in-from-bottom-2 duration-500 [text-shadow:0_1px_10px_rgba(0,0,0,0.7)]">
             Commercial real estate · deal screening
           </p>
-          <h1 className="font-script mt-3 max-w-3xl text-6xl leading-tight text-white sm:text-8xl animate-in fade-in slide-in-from-bottom-3 duration-700">
+          <h1 className="font-script mt-3 text-4xl leading-tight text-white sm:text-6xl [text-shadow:0_2px_26px_rgba(0,0,0,0.75)] animate-in fade-in slide-in-from-bottom-3 duration-700">
             Underwrite every deal in seconds.
           </h1>
-          <p className="mt-4 max-w-xl text-sm text-white/85 sm:text-base animate-in fade-in slide-in-from-bottom-3 duration-700">
-            Upload an Offering Memorandum. Property Pulse Check extracts the metrics, screens the risk, and returns a
-            <span className="font-medium text-white"> pursue</span> verdict with a full report, or
-            <span className="font-medium text-white"> excludes</span> it, with a downloadable report on every passing deal.
+          <p className="mt-5 max-w-sm text-sm leading-relaxed text-white/90 [text-shadow:0_1px_12px_rgba(0,0,0,0.85)] animate-in fade-in slide-in-from-bottom-3 duration-700">
+            Drop in an Offering Memorandum. We pull the metrics, screen the risk, and hand back a
+            <span className="font-semibold text-accent"> pursue</span> or
+            <span className="font-semibold text-accent"> exclude</span> verdict, with a downloadable report on every deal that passes.
           </p>
           <div className="mt-7 flex flex-wrap gap-3">
             <Link

@@ -179,7 +179,7 @@ function AnalysisPage() {
         </div>
       </div>
 
-      <RecommendationBanner recommendation={data.recommendation} reason={decision?.reason ?? ""} excluded={isExcluded} reportPath={data.report_path} />
+      <RecommendationBanner row={data} reason={decision?.reason ?? ""} excluded={isExcluded} />
 
       <HeroMetrics metrics={metrics} rules={rules} />
 

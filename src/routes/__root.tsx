@@ -111,11 +111,11 @@ function AppHeader() {
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
         <Link to="/" className="flex items-center gap-2.5">
           <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <span className="font-display text-lg leading-none">L</span>
+            <span className="font-display text-lg leading-none">P</span>
           </div>
           <div className="leading-tight">
-            <div className="font-display text-xl">Ledger</div>
-            <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">OM Screening</div>
+            <div className="font-display text-xl">Property Pulse Check</div>
+            <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Risk Screening</div>
           </div>
         </Link>
         <nav className="flex items-center gap-1">
@@ -171,7 +171,7 @@ function RootComponent() {
           <Outlet />
         </main>
         <footer className="border-t border-border py-6 text-center text-xs text-muted-foreground">
-          Ledger does not constitute investment advice. Always verify numbers against the source OM.
+          Property Pulse Check does not constitute investment advice. Always verify numbers against the source OM.
         </footer>
       </div>
     </QueryClientProvider>

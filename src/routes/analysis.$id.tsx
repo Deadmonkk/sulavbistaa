@@ -1,5 +1,4 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAnalysesRealtime } from "@/hooks/use-analyses-realtime";
@@ -15,9 +14,9 @@ import {
   type Recommendation,
 } from "@/lib/screening/taxonomy";
 import { formatMetric } from "@/lib/screening/format";
+import { generateReportPdf } from "@/lib/report-pdf";
 import { Markdown } from "@/components/markdown";
 import { ArrowLeft, CheckCircle2, AlertTriangle, XCircle, HelpCircle, Loader2, FileText, RefreshCw, ClipboardList, Download } from "lucide-react";
-import { generateReportPdf } from "@/lib/report-pdf";
 
 export const Route = createFileRoute("/analysis/$id")({
   head: () => ({
@@ -61,11 +60,6 @@ function resolveFamily(row: Row): PropertyFamily | null {
     return row.property_type as PropertyFamily;
   }
   return null;
-}
-
-async function downloadReport(reportPath: string): Promise<void> {
-  const { data, error } = await supabase.storage.from("reports").createSignedUrl(reportPath, 120);
-  if (!error && data?.signedUrl) window.open(data.signedUrl, "_blank");
 }
 
 function AnalysisPage() {
@@ -153,7 +147,7 @@ function AnalysisPage() {
       <div className="mt-6 flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Risk results</p>
-          <h1 className="font-display mt-2 text-4xl">{data.property_name || data.file_name}</h1>
+          <h1 className="font-script mt-2 text-5xl">{data.property_name || data.file_name}</h1>
           <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <FileText className="h-3.5 w-3.5" />
             <span className="truncate">{data.file_name}</span>
@@ -179,7 +173,7 @@ function AnalysisPage() {
         </div>
       </div>
 
-      <RecommendationBanner row={data} reason={decision?.reason ?? ""} excluded={isExcluded} />
+      <RecommendationBanner recommendation={data.recommendation} reason={decision?.reason ?? ""} excluded={isExcluded} onDownload={() => generateReportPdf(data)} />
 
       <HeroMetrics metrics={metrics} rules={rules} />
 
@@ -217,9 +211,7 @@ function AnalysisPage() {
             </div>
           )}
 
-          {data.report_text && (
-            <ReportCard reportText={data.report_text} reportPath={data.report_path} />
-          )}
+          {data.report_text && <ReportCard reportText={data.report_text} />}
         </section>
 
         <aside className="space-y-6">
@@ -297,33 +289,10 @@ function MetricList({ title, defs, bag }: { title: string; defs: typeof UNIVERSA
   );
 }
 
-function ReportCard({ reportText, reportPath }: { reportText: string; reportPath: string | null }) {
-  const [downloading, setDownloading] = useState(false);
-
-  const download = async () => {
-    if (!reportPath) return;
-    setDownloading(true);
-    try {
-      await downloadReport(reportPath);
-    } finally {
-      setDownloading(false);
-    }
-  };
-
+function ReportCard({ reportText }: { reportText: string }) {
   return (
     <div>
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Agent report</h2>
-        {reportPath && (
-          <button
-            onClick={download}
-            disabled={downloading}
-            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium hover:bg-secondary disabled:opacity-50"
-          >
-            {downloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} Download PDF
-          </button>
-        )}
-      </div>
+      <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Agent report</h2>
       <div className="mt-3 card-base px-6 py-5">
         <Markdown text={reportText} />
       </div>
@@ -339,8 +308,7 @@ function BackLink() {
   );
 }
 
-function RecommendationBanner({ row, reason, excluded }: { row: Row; reason: string; excluded: boolean }) {
-  const recommendation = row.recommendation;
+function RecommendationBanner({ recommendation, reason, excluded, onDownload }: { recommendation: Recommendation | null; reason: string; excluded: boolean; onDownload?: () => void }) {
   const map: Record<Recommendation, { label: string; tone: "success" | "warning" | "destructive"; sub: string }> = {
     pursue: { label: "Pursue", tone: "success", sub: "All risk rules pass." },
     pursue_with_conditions: { label: "Pursue with conditions", tone: "warning", sub: "Resolve high-risk flags and items needing review before bidding." },
@@ -359,25 +327,6 @@ function RecommendationBanner({ row, reason, excluded }: { row: Row; reason: str
     warning: "text-warning",
     destructive: "text-destructive",
   };
-  const btnTone: Record<string, string> = {
-    success: "bg-success text-success-foreground",
-    warning: "bg-warning text-warning-foreground",
-    destructive: "bg-destructive text-destructive-foreground",
-  };
-
-  const onDownload = () => generateReportPdf({
-    file_name: row.file_name,
-    property_name: row.property_name,
-    property_subtype: row.property_subtype,
-    property_type: row.property_type,
-    location: row.location,
-    created_at: row.created_at,
-    recommendation: row.recommendation,
-    metrics: row.metrics,
-    type_metrics: row.type_metrics,
-    risk_results: row.risk_results,
-    verify_items: row.verify_items,
-  });
 
   return (
     <div className={`mt-8 rounded-xl border p-6 ${toneClasses[cfg.tone]}`}>
@@ -387,17 +336,18 @@ function RecommendationBanner({ row, reason, excluded }: { row: Row; reason: str
           <div className={`font-display mt-1 text-4xl ${labelTone[cfg.tone]}`}>{cfg.label}</div>
           <p className="mt-2 max-w-2xl text-sm text-foreground/80">{reason || cfg.sub}</p>
         </div>
-        <button
-          onClick={onDownload}
-          className={`inline-flex shrink-0 items-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium shadow-card transition hover:opacity-90 ${btnTone[cfg.tone]}`}
-        >
-          <Download className="h-4 w-4" /> Download report
-        </button>
+        {(recommendation === "pursue" || recommendation === "pursue_with_conditions") && onDownload && (
+          <button
+            onClick={onDownload}
+            className="inline-flex shrink-0 items-center gap-2 rounded-md bg-success px-4 py-2.5 text-sm font-medium text-success-foreground shadow-card transition hover:opacity-90"
+          >
+            <Download className="h-4 w-4" /> Download report
+          </button>
+        )}
       </div>
     </div>
   );
 }
-
 
 function RuleCard({ rule }: { rule: RiskRuleResult }) {
   const cfg = statusCfg(rule.status);

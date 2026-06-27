@@ -90,9 +90,9 @@ function UploadPage() {
   return (
     <div className="mx-auto max-w-3xl px-6 py-12">
       <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Step 1 of 1</p>
-      <h1 className="font-display mt-2 text-5xl">Screen a new deal</h1>
+      <h1 className="font-script mt-2 text-6xl">Screen a new deal</h1>
       <p className="mt-3 max-w-xl text-sm text-muted-foreground">
-        Drop in the full Offering Memorandum PDF — any commercial type. Property Pulse Check detects the property type,
+        Drop in the full Offering Memorandum PDF, any commercial type. Property Pulse Check detects the property type,
         extracts the metrics, and runs the risk screen automatically.
       </p>
 

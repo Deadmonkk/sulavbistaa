@@ -1,0 +1,111 @@
+{
+  "name": "Ledger — OM analyze (SIMPLE)",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "ledger-analyze", "options": {} },
+      "id": "n-webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 200],
+      "webhookId": "ledger-analyze"
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.SUPABASE_URL }}/storage/v1/object/{{ $json.body.bucket }}/{{ $json.body.storage_path }}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "apikey", "value": "PASTE_SUPABASE_SECRET_KEY" },
+          { "name": "Authorization", "value": "Bearer PASTE_SUPABASE_SECRET_KEY" }
+        ] },
+        "options": { "response": { "response": { "responseFormat": "file" } } }
+      },
+      "id": "n-download",
+      "name": "Download OM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 200]
+    },
+    {
+      "parameters": { "operation": "pdf", "binaryPropertyName": "data", "options": {} },
+      "id": "n-extract",
+      "name": "Extract OM text",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [440, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "Authorization", "value": "Bearer PASTE_OPENROUTER_API_KEY" },
+          { "name": "Content-Type", "value": "application/json" }
+        ] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"model\": \"google/gemini-2.0-flash-exp:free\", \"response_format\": { \"type\": \"json_object\" }, \"messages\": [ { \"role\": \"system\", \"content\": \"You are a CRE underwriting analyst. From the OM text return ONLY JSON: { property_name, location, property_subtype (multifamily|sfr|hotel|office|retail|industrial|mixed_use), metrics: { purchase_price, price_per_unit, gross_income, operating_expenses, noi, noi_margin_pct, cap_rate_pct, market_cap_rate_pct, occupancy_pct, annual_debt_service, dscr, loan_amount, ltv_pct, expense_ratio_pct, year_built }, type_metrics: {}, confidence: { <metric>: high|low|missing }, summary: '2-3 sentence plain-English summary', investor_verdict: 'who should buy and why (core/value-add/opportunistic), the thesis, and the one condition that changes the call' }. Use null for anything not stated; never guess.\" }, { \"role\": \"user\", \"content\": $('Extract OM text').first().json.text } ] } }}",
+        "options": {}
+      },
+      "id": "n-openrouter",
+      "name": "OpenRouter",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// PASTE n8n/score-simple.js here. Outputs { json: { analysis_id, patch } }.\nthrow new Error('Paste n8n/score-simple.js into this Code node.');"
+      },
+      "id": "n-score",
+      "name": "Score",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 200]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/analyses?id=eq.{{ $json.analysis_id }}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "apikey", "value": "PASTE_SUPABASE_SECRET_KEY" },
+          { "name": "Authorization", "value": "Bearer PASTE_SUPABASE_SECRET_KEY" },
+          { "name": "Content-Type", "value": "application/json" },
+          { "name": "Prefer", "value": "return=minimal" }
+        ] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.patch }}",
+        "options": {}
+      },
+      "id": "n-writeback",
+      "name": "Write back",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 200]
+    },
+    {
+      "parameters": {
+        "content": "## Ledger — SIMPLE (6 nodes)\nWebhook -> Download OM -> Extract text -> OpenRouter (metrics + summary + verdict) -> Score (paste score-simple.js) -> Write back.\n\nSet SUPABASE_URL as an n8n env var (or hardcode the URL). Replace PASTE_SUPABASE_SECRET_KEY and PASTE_OPENROUTER_API_KEY in the header fields with your real keys (or use Credentials).\n\nThe report/PDF is generated in the app (client-side) from report_text + metrics — no Gotenberg needed.",
+        "height": 240,
+        "width": 420
+      },
+      "id": "n-note",
+      "name": "Read me",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [220, -80]
+    }
+  ],
+  "connections": {
+    "Webhook": { "main": [[{ "node": "Download OM", "type": "main", "index": 0 }]] },
+    "Download OM": { "main": [[{ "node": "Extract OM text", "type": "main", "index": 0 }]] },
+    "Extract OM text": { "main": [[{ "node": "OpenRouter", "type": "main", "index": 0 }]] },
+    "OpenRouter": { "main": [[{ "node": "Score", "type": "main", "index": 0 }]] },
+    "Score": { "main": [[{ "node": "Write back", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "pinData": {}
+}

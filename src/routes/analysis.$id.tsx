@@ -1,5 +1,4 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAnalysesRealtime } from "@/hooks/use-analyses-realtime";
@@ -15,6 +14,7 @@ import {
   type Recommendation,
 } from "@/lib/screening/taxonomy";
 import { formatMetric } from "@/lib/screening/format";
+import { generateReportPdf } from "@/lib/report-pdf";
 import { Markdown } from "@/components/markdown";
 import { ArrowLeft, CheckCircle2, AlertTriangle, XCircle, HelpCircle, Loader2, FileText, RefreshCw, ClipboardList, Download } from "lucide-react";
 
@@ -60,11 +60,6 @@ function resolveFamily(row: Row): PropertyFamily | null {
     return row.property_type as PropertyFamily;
   }
   return null;
-}
-
-async function downloadReport(reportPath: string): Promise<void> {
-  const { data, error } = await supabase.storage.from("reports").createSignedUrl(reportPath, 120);
-  if (!error && data?.signedUrl) window.open(data.signedUrl, "_blank");
 }
 
 function AnalysisPage() {
@@ -178,7 +173,7 @@ function AnalysisPage() {
         </div>
       </div>
 
-      <RecommendationBanner recommendation={data.recommendation} reason={decision?.reason ?? ""} excluded={isExcluded} reportPath={data.report_path} />
+      <RecommendationBanner recommendation={data.recommendation} reason={decision?.reason ?? ""} excluded={isExcluded} onDownload={() => generateReportPdf(data)} />
 
       <HeroMetrics metrics={metrics} rules={rules} />
 
@@ -216,9 +211,7 @@ function AnalysisPage() {
             </div>
           )}
 
-          {data.report_text && (
-            <ReportCard reportText={data.report_text} reportPath={data.report_path} />
-          )}
+          {data.report_text && <ReportCard reportText={data.report_text} />}
         </section>
 
         <aside className="space-y-6">
@@ -296,33 +289,10 @@ function MetricList({ title, defs, bag }: { title: string; defs: typeof UNIVERSA
   );
 }
 
-function ReportCard({ reportText, reportPath }: { reportText: string; reportPath: string | null }) {
-  const [downloading, setDownloading] = useState(false);
-
-  const download = async () => {
-    if (!reportPath) return;
-    setDownloading(true);
-    try {
-      await downloadReport(reportPath);
-    } finally {
-      setDownloading(false);
-    }
-  };
-
+function ReportCard({ reportText }: { reportText: string }) {
   return (
     <div>
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Agent report</h2>
-        {reportPath && (
-          <button
-            onClick={download}
-            disabled={downloading}
-            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium hover:bg-secondary disabled:opacity-50"
-          >
-            {downloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} Download PDF
-          </button>
-        )}
-      </div>
+      <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Agent report</h2>
       <div className="mt-3 card-base px-6 py-5">
         <Markdown text={reportText} />
       </div>
@@ -338,7 +308,7 @@ function BackLink() {
   );
 }
 
-function RecommendationBanner({ recommendation, reason, excluded, reportPath }: { recommendation: Recommendation | null; reason: string; excluded: boolean; reportPath: string | null }) {
+function RecommendationBanner({ recommendation, reason, excluded, onDownload }: { recommendation: Recommendation | null; reason: string; excluded: boolean; onDownload?: () => void }) {
   const map: Record<Recommendation, { label: string; tone: "success" | "warning" | "destructive"; sub: string }> = {
     pursue: { label: "Pursue", tone: "success", sub: "All risk rules pass." },
     pursue_with_conditions: { label: "Pursue with conditions", tone: "warning", sub: "Resolve high-risk flags and items needing review before bidding." },
@@ -366,9 +336,9 @@ function RecommendationBanner({ recommendation, reason, excluded, reportPath }: 
           <div className={`font-display mt-1 text-4xl ${labelTone[cfg.tone]}`}>{cfg.label}</div>
           <p className="mt-2 max-w-2xl text-sm text-foreground/80">{reason || cfg.sub}</p>
         </div>
-        {recommendation === "pursue" && reportPath && (
+        {(recommendation === "pursue" || recommendation === "pursue_with_conditions") && onDownload && (
           <button
-            onClick={() => downloadReport(reportPath)}
+            onClick={onDownload}
             className="inline-flex shrink-0 items-center gap-2 rounded-md bg-success px-4 py-2.5 text-sm font-medium text-success-foreground shadow-card transition hover:opacity-90"
           >
             <Download className="h-4 w-4" /> Download report

@@ -35,6 +35,7 @@ export type Database = {
           storage_path: string | null
           type_detected_by: string | null
           type_metrics: Json | null
+          user_id: string
           verify_items: Json | null
         }
         Insert: {
@@ -57,6 +58,7 @@ export type Database = {
           storage_path?: string | null
           type_detected_by?: string | null
           type_metrics?: Json | null
+          user_id?: string
           verify_items?: Json | null
         }
         Update: {
@@ -79,6 +81,7 @@ export type Database = {
           storage_path?: string | null
           type_detected_by?: string | null
           type_metrics?: Json | null
+          user_id?: string
           verify_items?: Json | null
         }
         Relationships: []

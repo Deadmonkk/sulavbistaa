@@ -1,5 +1,5 @@
 {
-  "name": "Ledger — OM analyze (SIMPLE)",
+  "name": "Property Pulse Check — OM analyze (SIMPLE)",
   "nodes": [
     {
       "parameters": { "httpMethod": "POST", "path": "ledger-analyze", "options": {} },
@@ -88,7 +88,7 @@
     },
     {
       "parameters": {
-        "content": "## Ledger — SIMPLE (6 nodes)\nWebhook -> Download OM -> Extract text -> OpenRouter (metrics + summary + verdict) -> Score (paste score-simple.js) -> Write back.\n\nSet SUPABASE_URL as an n8n env var (or hardcode the URL). Replace PASTE_SUPABASE_SECRET_KEY and PASTE_OPENROUTER_API_KEY in the header fields with your real keys (or use Credentials).\n\nThe report/PDF is generated in the app (client-side) from report_text + metrics — no Gotenberg needed.",
+        "content": "## Property Pulse Check — SIMPLE (6 nodes)\nWebhook -> Download OM -> Extract text -> OpenRouter (metrics + summary + verdict) -> Score (paste score-simple.js) -> Write back.\n\nSet SUPABASE_URL as an n8n env var (or hardcode the URL). Replace PASTE_SUPABASE_SECRET_KEY and PASTE_OPENROUTER_API_KEY in the header fields with your real keys (or use Credentials).\n\nThe report/PDF is generated in the app (client-side) from report_text + metrics — no Gotenberg needed.",
         "height": 240,
         "width": 420
       },
